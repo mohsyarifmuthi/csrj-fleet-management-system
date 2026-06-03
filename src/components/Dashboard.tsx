@@ -4,7 +4,6 @@ import {
   Truck,
   CheckCircle,
   AlertTriangle,
-  DollarSign,
   TrendingUp,
   AlertOctagon,
   Calendar,
@@ -166,8 +165,8 @@ export default function Dashboard({ onNavigateToSection }: DashboardProps) {
         {/* Operating Costs Card */}
         <div className="bg-white border border-slate-150 p-5 rounded-2xl shadow-xs hover:shadow-md transition-all duration-300">
           <div className="flex items-center justify-between mb-2">
-            <div className="w-11 h-11 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl flex items-center justify-center text-white shadow-sm shadow-indigo-500/20">
-              <DollarSign className="w-5 h-5" />
+            <div className="w-11 h-11 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl flex items-center justify-center text-white shadow-sm shadow-indigo-500/20 font-sans font-black text-sm select-none">
+              Rp
             </div>
             <span className="text-xxs font-extrabold text-red-600 bg-red-50 px-2 py-1 rounded-lg border border-red-150/40">
               +1.2%

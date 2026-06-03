@@ -1,11 +1,11 @@
 export const translations = {
   id: {
     appName: 'CSRJ Fleet Management',
-    fleetMgmt: 'Manajemen Armada',
+    fleetMgmt: 'Manajemen Car CRJ',
     menu: 'Menu Utama',
     settings: 'Pengaturan & Log',
     dashboard: 'Dashboard',
-    vehicles: 'Armada Kendaraan',
+    vehicles: 'Kendaraan',
     drivers: 'Daftar Pengemudi',
     maintenance: 'Jadwal Perawatan',
     dailyCheck: 'Inspeksi & Checklist',
