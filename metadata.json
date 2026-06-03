@@ -1,0 +1,6 @@
+{
+  "name": "CSRJ Fleet Management System",
+  "description": "Sistem Manajemen Armada CSRJ lengkap dengan dashboard interaktif, CRUD kendaraan, pengemudi, pemeliharaan, pengeluaran, checklist harian, audit log admin, ekspor PDF/Excel, dan autentikasi multi-peran.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
