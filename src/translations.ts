@@ -1,11 +1,11 @@
 export const translations = {
   id: {
     appName: 'CSRJ Fleet Management',
-    fleetMgmt: 'Manajemen Car CRJ',
+    fleetMgmt: 'Manajemen Armada',
     menu: 'Menu Utama',
     settings: 'Pengaturan & Log',
     dashboard: 'Dashboard',
-    vehicles: 'Kendaraan',
+    vehicles: 'Armada Kendaraan',
     drivers: 'Daftar Pengemudi',
     maintenance: 'Jadwal Perawatan',
     dailyCheck: 'Inspeksi & Checklist',
@@ -126,9 +126,18 @@ export const translations = {
     category: 'Kategori Biaya',
     amount: 'Jumlah (Rp)',
     description: 'Rincian / Keterangan',
-    receiptPhoto: 'Bukti Kuitansi / 영수증 (Opsional)',
+    receiptPhoto: 'Bukti Kuitansi / Struk(Opsional)',
     uploadPhoto: 'Unggah Foto Bukti Transaksi',
     latestExpenses: 'Daftar Pengeluaran Terkini',
+    passenger: 'Penumpang / Staff',
+    startLocation: 'Rute Mulai',
+    destination: 'Rute Tujuan',
+    departureTime: 'Jam Berangkat',
+    returnTime: 'Jam Pulang',
+    allVehicles: 'Semua Kendaraan',
+    startDateFilter: 'Waktu Mulai',
+    endDateFilter: 'Waktu Akhir',
+    
 
     // Reports
     costByVehicle: 'Total Pengeluaran Per Plat Kendaraan (Juta Rp)',
@@ -294,6 +303,14 @@ export const translations = {
     receiptPhoto: 'Proof of Receipt Image (Optional)',
     uploadPhoto: 'Upload Receipt Transaction Picture',
     latestExpenses: 'Recent Expense Ledger',
+    passenger: 'Passenger / Staff',
+    startLocation: 'Start Location / Origin',
+    destination: 'Destination',
+    departureTime: 'Departure Time',
+    returnTime: 'Return Time',
+    allVehicles: 'All Cars' ,
+    startDateFilter: 'Start Time',
+    endDateFilter: 'End Time',
 
     // Reports
     costByVehicle: 'Total Spending per Vehicle Plate (Millions Rp)',

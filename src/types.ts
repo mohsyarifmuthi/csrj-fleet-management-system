@@ -82,6 +82,12 @@ export interface Expense {
   description: string;
   amount: number;
   driverName: string;
+  passenger?: string;
+  startLocation?: string;
+  destination?: string;
+  departureTime?: string;
+  returnTime?: string;
+  receiptPhoto?: string;
 }
 
 export interface ActivityLog {
