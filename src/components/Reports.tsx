@@ -3,7 +3,7 @@ import { useDatabase } from '../context/DatabaseContext';
 import { translations } from '../translations';
 import { FileDown, Printer, CheckSquare, Calendar, FolderHeart, Info, TrendingUp, BarChart3, PieChart } from 'lucide-react';
 import { ExpenseCategory } from '../types';
-
+//import { svgString } from '../assets/icons/logo';
 export default function Reports() {
   const {
     expenses,
@@ -16,16 +16,29 @@ export default function Reports() {
   const t = translations[language];
 
   const [dateFilter, setDateFilter] = useState('2026');
+  const [filterPlate, setFilterPlate] = useState('all');
+  const [filterCategory, setFilterCategory] = useState('all');
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
 
-  // Calculate sum of each category dynamically
+  // Perform filtering
+  const filteredExpenses = expenses.filter(e => {
+    const matchesPlate = filterPlate === 'all' || e.vehiclePlate === filterPlate;
+    const matchesCategory = filterCategory === 'all' || e.category === filterCategory;
+    const matchesStartDate = !filterStartDate || e.date >= filterStartDate;
+    const matchesEndDate = !filterEndDate || e.date <= filterEndDate;
+    return matchesPlate && matchesCategory && matchesStartDate && matchesEndDate;
+  });
+
+  // Calculate sum of each category dynamically based on filtered data
   const getSumOfCategory = (cat: ExpenseCategory) => {
-    return expenses
+    return filteredExpenses
       .filter(e => e.category === cat)
       .reduce((sum, e) => sum + e.amount, 0);
   };
 
   const getSumOfVehicle = (plate: string) => {
-    return expenses
+    return filteredExpenses
       .filter(e => e.vehiclePlate === plate)
       .reduce((sum, e) => sum + e.amount, 0);
   };
@@ -35,11 +48,18 @@ export default function Reports() {
     let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; // Include BOM for Excel Indonesian localizations
     
     // Header
-    csvContent += "Laporan Kas Pengeluaran Armada CSRJ - Tahun " + dateFilter + "\n\n";
+    let filterDetails = [];
+    if (filterStartDate) filterDetails.push(`Dari: ${filterStartDate}`);
+    if (filterEndDate) filterDetails.push(`Sampai: ${filterEndDate}`);
+    if (filterPlate !== 'all') filterDetails.push(`Plat: ${filterPlate}`);
+    if (filterCategory !== 'all') filterDetails.push(`Kategori: ${filterCategory.toUpperCase()}`);
+    const filterStr = filterDetails.length > 0 ? ` (Saringan: ${filterDetails.join(' | ')})` : '';
+
+    csvContent += "Laporan Kas Pengeluaran Armada CSRJ" + filterStr + "\n\n";
     csvContent += "ID,Tanggal,No Plat Kendaraan,Kategori Biaya,Keterangan Deskripsi,Nominal (IDR),Operator Pengemudi\n";
     
     // Rows
-    expenses.forEach((expense) => {
+    filteredExpenses.forEach((expense) => {
       const row = [
         expense.id,
         expense.date,
@@ -56,7 +76,10 @@ export default function Reports() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Laporan_Keuangan_Armada_CSRJ_${dateFilter}.csv`);
+    const downloadName = filterPlate !== 'all' 
+      ? `Laporan_Keuangan_Armada_${filterPlate}.csv` 
+      : 'Laporan_Keuangan_Armada_CSRJ.csv';
+    link.setAttribute("download", downloadName);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -70,42 +93,62 @@ export default function Reports() {
       return;
     }
 
-    const totalCalculatedCost = expenses.reduce((sum, e) => sum + e.amount, 0);
+    const totalCalculatedCost = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
     const totalMaintenanceCost = maintenanceLogs.reduce((sum, e) => sum + e.cost, 0);
 
     const htmlContent = `
       <html>
-        <head>
-          <title>CSRJ Fleet Management System - Laporan Armada</title>
-          <style>
-            body { font-family: 'Helvetica Neue', Arial, sans-serif; padding: 40px; color: #1e293b; background: white; }
-            .header { text-align: center; border-bottom: 3px double #cbd5e1; padding-bottom: 20px; margin-bottom: 30px; }
-            .header h1 { font-size: 26px; font-weight: 800; color: #1e3a8a; margin: 0; }
-            .header p { font-size: 13px; color: #64748b; margin-top: 5px; text-transform: uppercase; letter-spacing: 1px; }
-            .meta-grid { display: grid; grid-template-cols: 1fr 1fr; gap: 20px; margin-bottom: 40px; background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #f1f5f9; }
-            .meta-item { font-size: 12px; font-weight: 600; color: #475569; }
-            .meta-item span { font-weight: 800; color: #0f172a; font-family: monospace; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 11px; }
-            th { border-bottom: 2px solid #e2e8f0; padding: 12px 10px; font-weight: 700; color: #64748b; text-transform: uppercase; text-align: left; }
-            td { padding: 12px 10px; border-bottom: 1px solid #f1f5f9; color: #334155; }
-            .total-row { background: #f8fafc; font-size: 13px; font-weight: 850; border-top: 2px solid #cbd5e1; }
-            .footer { text-align: center; margin-top: 100px; font-size: 11px; color: #94a3b8; border-top: 1px solid #f1f5f9; padding-top: 20px; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>CSRJ FLEET MANAGEMENT SYSTEM</h1>
-            <p>Laporan Resmi Rekapitulasi Kas Operasional & Pemeliharaan</p>
-          </div>
-          
+       <head>
+            <title>CSRJ Fleet Management System - Laporan Kendaraan</title>
+                <style>
+                    body { font-family: 'Helvetica Neue', Arial, sans-serif; padding: 40px; color: #1e293b; background: white; }
+                    .header { 
+                        text-align: center; 
+                        border-bottom: 3px double #cbd5e1; 
+                        padding-bottom: 20px; 
+                        margin-bottom: 30px;
+                    }
+                    .header-content {
+                        display: flex;
+                        align-items: center;      
+                        justify-content: center;   
+                        gap: 16px;                
+                        margin-bottom: 5px;
+                    }
+                    .header h1 { font-size: 26px; font-weight: 800; color: #1e3a8a; margin: 0; }
+                    .header p { font-size: 13px; color: #64748b; margin-top: 5px; text-transform: uppercase; letter-spacing: 1px; }
+                    
+                    .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 40px; background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #f1f5f9; }
+                    .meta-item { font-size: 12px; font-weight: 600; color: #475569; }
+                    .meta-item span { font-weight: 800; color: #0f172a; font-family: monospace; }
+                    table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 11px; }
+                    th { border-bottom: 2px solid #e2e8f0; padding: 12px 10px; font-weight: 700; color: #64748b; text-transform: uppercase; text-align: left; }
+                    td { padding: 12px 10px; border-bottom: 1px solid #f1f5f9; color: #334155; }
+                    .total-row { background: #f8fafc; font-size: 13px; font-weight: 850; border-top: 2px solid #cbd5e1; }
+                    .footer { text-align: center; margin-top: 100px; font-size: 11px; color: #94a3b8; border-top: 1px solid #f1f5f9; padding-top: 20px; }
+                </style>
+            </head>
+            <body>
+        <div class="header">
+            <!-- PERUBAHAN: Bungkus logo dan teks dalam div .header-content -->
+            <div class="header-content">
+            <img src="/CSG.jpg" alt="CSG Logo" width="60" height="60" />
+            <div>
+                <h1>JJ2 FLEET MANAGEMENT SYSTEM</h1>
+                <p>Laporan Resmi Rekapitulasi Kas Operasional & Pemeliharaan</p>
+            </div>
+            </div>
+        </div>
           <div class="meta-grid">
             <div class="meta-item">Tanggal Cetak: <span>${new Date().toLocaleDateString('id-ID')}</span></div>
-            <div class="meta-item">Filter Tahun: <span>${dateFilter}</span></div>
+            <div class="meta-item">No Plat: <span>${filterPlate === 'all' ? 'Semua Armada' : filterPlate}</span></div>
+            <div class="meta-item">Kategori: <span>${filterCategory === 'all' ? 'Semua Kategori' : filterCategory.toUpperCase()}</span></div>
+            <div class="meta-item">Mulai Tanggal: <span>${filterStartDate || '-'}</span></div>
+            <div class="meta-item">Sampai Tanggal: <span>${filterEndDate || '-'}</span></div>
             <div class="meta-item">Total Biaya Operasional: <span>Rp ${totalCalculatedCost.toLocaleString('id-ID')}</span></div>
-            <div class="meta-item">Total Biaya Servis Bengkel: <span>Rp ${totalMaintenanceCost.toLocaleString('id-ID')}</span></div>
           </div>
 
-          <h2>Catatan Ledger Kas Biaya Operasional harian</h2>
+          <h2>Catatan Kas Biaya Operasional Harian</h2>
           <table>
             <thead>
               <tr>
@@ -118,7 +161,7 @@ export default function Reports() {
               </tr>
             </thead>
             <tbody>
-              ${expenses.map(e => `
+              ${filteredExpenses.map(e => `
                 <tr>
                   <td>${e.date}</td>
                   <td><b>${e.vehiclePlate}</b></td>
@@ -129,7 +172,7 @@ export default function Reports() {
                 </tr>
               `).join('')}
               <tr class="total-row">
-                <td colSpan="4" style="text-align: right;">TOTAL OPERASIONAL KESELURUHAN:</td>
+                <td colSpan="4" style="text-align: right;">TOTAL OPERASIONAL SECARA FILTER:</td>
                 <td colSpan="2">Rp ${totalCalculatedCost.toLocaleString('id-ID')}</td>
               </tr>
             </tbody>
@@ -137,11 +180,12 @@ export default function Reports() {
 
           <div class="footer">
             <p>Dokumen Laporan Kas CSRJ ini dikeluarkan secara digital oleh Sistem Audit Trail Terpusat.</p>
-            <p>&copy; 2026 CSRJ Fleet Management System, Jakarta, Indonesia.</p>
+            <p>&copy; <span id="tahun-cetak"></span> CSRJ Fleet Management System, Garut-Leles, Indonesia.</p>
           </div>
 
           <script>
-            window.onload = function() { window.print(); }
+            window.onload = function() { window.print();
+            document.getElementById('tahun-cetak').textContent = new Date().getFullYear(); }
           </script>
         </body>
       </html>
@@ -152,21 +196,23 @@ export default function Reports() {
   };
 
   // Map spending per plates
-  const expenseMapPlates = vehicles.map(v => {
-    return { plate: v.plateNumber, amount: getSumOfVehicle(v.plateNumber) / 1000000 }; // inside Millions Rp
-  });
+  const expenseMapPlates = vehicles
+    .filter(v => filterPlate === 'all' || v.plateNumber === filterPlate)
+    .map(v => {
+      return { plate: v.plateNumber, amount: getSumOfVehicle(v.plateNumber) / 1000000 }; // inside Millions Rp
+    });
 
   const maxSpendingPlateVal = Math.max(...expenseMapPlates.map(v => v.amount)) || 1;
 
   // Pie distributions
-  const totalSumDist = expenses.reduce((sum, e) => sum + e.amount, 0) || 1;
+  const totalSumDist = filteredExpenses.reduce((sum, e) => sum + e.amount, 0) || 1;
   const pieDistribution = [
     { cat: 'fuel', label: t.fuel, amount: getSumOfCategory('fuel'), color: 'bg-blue-500' },
     { cat: 'toll', label: t.toll, amount: getSumOfCategory('toll'), color: 'bg-amber-500' },
     { cat: 'oil', label: t.oil, amount: getSumOfCategory('oil'), color: 'bg-purple-500' },
     { cat: 'parking', label: t.parking, amount: getSumOfCategory('parking'), color: 'bg-emerald-400' },
     { cat: 'other', label: t.other, amount: getSumOfCategory('other'), color: 'bg-pink-500' },
-  ];
+  ].filter(item => filterCategory === 'all' || item.cat === filterCategory);
 
   return (
     <div className="space-y-6">
@@ -199,6 +245,79 @@ export default function Reports() {
           </button>
         </div>
 
+      </div>
+
+      {/* Filter panel */}
+      <div className="bg-white p-4.5 rounded-2xl border border-slate-150 shadow-xs">
+        <div className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5 font-sans leading-none">
+          <FolderHeart className="w-3.5 h-3.5 text-blue-500" />
+          <span>Saring Laporan Keuangan</span>
+        </div>
+        
+        <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3">
+          {/* Vehicle Dropdown */}
+          <select
+            value={filterPlate}
+            onChange={(e) => setFilterPlate(e.target.value)}
+            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-600 focus:outline-none focus:border-blue-500 w-full sm:w-auto shrink-0 cursor-pointer"
+          >
+            <option value="all">{t.allVehicles}</option>
+            {vehicles.map(v => (
+              <option key={v.id} value={v.plateNumber}>{v.plateNumber}</option>
+            ))}
+          </select>
+
+          {/* Category Dropdown */}
+          <select
+            value={filterCategory}
+            onChange={(e) => setFilterCategory(e.target.value as any)}
+            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-600 focus:outline-none focus:border-blue-500 w-full sm:w-auto shrink-0 cursor-pointer"
+          >
+            <option value="all">{t.allCategories}</option>
+            <option value="fuel">{t.fuel}</option>
+            <option value="toll">{t.toll}</option>
+            <option value="oil">{t.oil}</option>
+            <option value="parking">{t.parking}</option>
+            <option value="other">{t.other}</option>
+          </select>
+
+          {/* Start Date */}
+          <div className="flex items-center justify-between sm:justify-start gap-2 bg-slate-50/50 border border-slate-150 rounded-xl px-3 py-1.5 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 w-full sm:w-auto">
+            <span className="text-[10px] uppercase font-extrabold text-slate-400 font-sans shrink-0">{t.startDateFilter}</span>
+            <input
+              type="date"
+              value={filterStartDate}
+              onChange={(e) => setFilterStartDate(e.target.value)}
+              className="bg-slate-50 border border-slate-150 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-600 focus:outline-none focus:border-blue-500 font-sans cursor-pointer w-32"
+            />
+          </div>
+
+          {/* End Date */}
+          <div className="flex items-center justify-between sm:justify-start gap-2 bg-slate-50/50 border border-slate-150 rounded-xl px-3 py-1.5 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 w-full sm:w-auto">
+            <span className="text-[10px] uppercase font-extrabold text-slate-400 font-sans shrink-0">{t.endDateFilter}</span>
+            <input
+              type="date"
+              value={filterEndDate}
+              onChange={(e) => setFilterEndDate(e.target.value)}
+              className="bg-slate-50 border border-slate-150 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-600 focus:outline-none focus:border-blue-500 font-sans cursor-pointer w-32"
+            />
+          </div>
+
+          {/* Reset Filters */}
+          {(filterStartDate || filterEndDate || filterPlate !== 'all' || filterCategory !== 'all') && (
+            <button
+              onClick={() => {
+                setFilterPlate('all');
+                setFilterCategory('all');
+                setFilterStartDate('');
+                setFilterEndDate('');
+              }}
+              className="px-3 py-2 border border-slate-200 text-slate-500 hover:text-slate-800 rounded-xl bg-slate-50 hover:bg-slate-100 font-extrabold text-xs sm:text-[10px] sm:px-2.5 sm:py-1.5 transition-all cursor-pointer w-full sm:w-auto text-center"
+            >
+              Reset
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Visual Analysis charts rows */}

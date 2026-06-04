@@ -16,9 +16,7 @@
     "allowJs": true,
     "jsx": "react-jsx",
     "paths": {
-      "@/*": [
-        "./*"
-      ]
+      "@/*": ["./*"]
     },
     "typeRoots": ["./node_modules/@types", "./src/types"],
     "allowImportingTsExtensions": true,

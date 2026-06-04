@@ -158,35 +158,35 @@ export default function Expenses() {
     <div className="space-y-6">
       
       {/* 4 Categorized totals indicators */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 xs:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
         
-        <div className="bg-white border border-slate-150 p-4.5 rounded-2xl shadow-xs">
+        <div className="bg-white border border-slate-150 p-3.5 sm:p-4.5 rounded-2xl shadow-xs">
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t.fuel}</div>
-          <div className="text-lg font-black text-slate-800 font-mono mt-2">
+          <div className="text-base sm:text-lg font-black text-slate-800 font-mono mt-2">
             {formatAmount(getSumOfCategory('fuel'))}
           </div>
           <div className="text-[10px] font-semibold text-emerald-600 mt-1">✓ Berhasil teraudit</div>
         </div>
 
-        <div className="bg-white border border-slate-150 p-4.5 rounded-2xl shadow-xs">
+        <div className="bg-white border border-slate-150 p-3.5 sm:p-4.5 rounded-2xl shadow-xs">
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t.toll}</div>
-          <div className="text-lg font-black text-slate-800 font-mono mt-2">
+          <div className="text-base sm:text-lg font-black text-slate-800 font-mono mt-2">
             {formatAmount(getSumOfCategory('toll'))}
           </div>
           <div className="text-[10px] font-semibold text-emerald-600 mt-1">✓ Berhasil teraudit</div>
         </div>
 
-        <div className="bg-white border border-slate-150 p-4.5 rounded-2xl shadow-xs">
+        <div className="bg-white border border-slate-150 p-3.5 sm:p-4.5 rounded-2xl shadow-xs">
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t.oil}</div>
-          <div className="text-lg font-black text-slate-800 font-mono mt-2">
+          <div className="text-base sm:text-lg font-black text-slate-800 font-mono mt-2">
             {formatAmount(getSumOfCategory('oil'))}
           </div>
           <div className="text-[10px] font-semibold text-slate-400 mt-1">Statis</div>
         </div>
 
-        <div className="bg-white border border-slate-150 p-4.5 rounded-2xl shadow-xs">
+        <div className="bg-white border border-slate-150 p-3.5 sm:p-4.5 rounded-2xl shadow-xs">
           <div className="text-[10px] font-bold text-slate-405 uppercase tracking-wider">Parkir & Lainnya</div>
-          <div className="text-lg font-black text-slate-800 font-mono mt-2">
+          <div className="text-base sm:text-lg font-black text-slate-800 font-mono mt-2">
             {formatAmount(getSumOfCategory('parking') + getSumOfCategory('other'))}
           </div>
           <div className="text-[10px] font-semibold text-amber-600 mt-1">↗ Menanjak</div>
@@ -198,11 +198,11 @@ export default function Expenses() {
       <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-150 shadow-xs">
         
         {/* Dynamic filter selectors */}
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 flex-1 min-w-0">
           <select
             value={filterPlate}
             onChange={(e) => setFilterPlate(e.target.value)}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-600 focus:outline-none focus:border-blue-500"
+            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-600 focus:outline-none focus:border-blue-500 w-full sm:w-auto shrink-0"
           >
             <option value="all">{t.allVehicles}</option>
             {vehicles.map(v => (
@@ -213,7 +213,7 @@ export default function Expenses() {
           <select
             value={filterCategory}
             onChange={(e) => setFilterCategory(e.target.value as any)}
-            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-600 focus:outline-none focus:border-blue-500"
+            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-600 focus:outline-none focus:border-blue-500 w-full sm:w-auto shrink-0"
           >
             <option value="all">{t.allCategories}</option>
             <option value="fuel">{t.fuel}</option>
@@ -224,8 +224,8 @@ export default function Expenses() {
           </select>
 
           {/* Start date filter */}
-          <div className="flex items-center gap-1.5 xs:pl-2 xs:border-l border-slate-200">
-            <span className="text-[10px] uppercase font-extrabold text-slate-400 font-sans">{t.startDateFilter}</span>
+          <div className="flex items-center justify-between sm:justify-start gap-2 bg-slate-50/50 border border-slate-150 rounded-xl px-3 py-1.5 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 w-full sm:w-auto">
+            <span className="text-[10px] uppercase font-extrabold text-slate-400 font-sans shrink-0">{t.startDateFilter}</span>
             <input
               type="date"
               value={filterStartDate}
@@ -235,8 +235,8 @@ export default function Expenses() {
           </div>
 
           {/* End date filter */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] uppercase font-extrabold text-slate-400 font-sans">{t.endDateFilter}</span>
+          <div className="flex items-center justify-between sm:justify-start gap-2 bg-slate-50/50 border border-slate-150 rounded-xl px-3 py-1.5 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 w-full sm:w-auto">
+            <span className="text-[10px] uppercase font-extrabold text-slate-400 font-sans shrink-0">{t.endDateFilter}</span>
             <input
               type="date"
               value={filterEndDate}
@@ -251,7 +251,7 @@ export default function Expenses() {
                 setFilterStartDate('');
                 setFilterEndDate('');
               }}
-              className="px-2.5 py-1.5 border border-slate-200 text-slate-500 hover:text-slate-800 rounded-xl bg-slate-50 hover:bg-slate-100 font-extrabold text-[10px] transition-all cursor-pointer"
+              className="px-3 py-2 border border-slate-200 text-slate-500 hover:text-slate-800 rounded-xl bg-slate-50 hover:bg-slate-100 font-extrabold text-xs sm:text-[10px] sm:px-2.5 sm:py-1.5 transition-all cursor-pointer w-full sm:w-auto text-center"
               title="Reset Filter Tanggal"
             >
               Reset
@@ -410,9 +410,9 @@ export default function Expenses() {
 
       {showModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl border border-slate-100 overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl border border-slate-100 overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
             {/* Header */}
-            <div className="px-6 py-4.5 border-b border-slate-150 flex items-center justify-between bg-slate-50">
+            <div className="px-6 py-4.5 border-b border-slate-150 flex items-center justify-between bg-slate-50 shrink-0">
               <h2 className="text-sm font-extrabold text-slate-800 tracking-tight">
                 {t.addExpense}
               </h2>
@@ -425,7 +425,7 @@ export default function Expenses() {
             </div>
 
             {/* Inputs Form */}
-            <form onSubmit={handleSave} className="p-6 space-y-4">
+            <form onSubmit={handleSave} className="p-6 space-y-4 overflow-y-auto flex-1 scrollbar-thin">
               <div className="grid grid-cols-2 gap-3.5">
                 <div>
                   <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">{t.selectVehicle}</label>
