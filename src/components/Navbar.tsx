@@ -17,7 +17,8 @@ export default function Navbar({ title, searchQuery, setSearchQuery, setSidebarO
     markNotificationAsRead,
     markAllNotificationsAsRead,
     language,
-    setLanguage
+    setLanguage,
+    dbConnected
   } = useDatabase();
   const t = translations[language];
 
@@ -61,22 +62,32 @@ export default function Navbar({ title, searchQuery, setSearchQuery, setSidebarO
   };
 
   return (
-    <header className="bg-white border-b border-slate-200 h-18 px-4 md:px-8 flex items-center justify-between shadow-sm sticky top-0 z-30 select-none">
+    <header className="bg-white border-b border-slate-200 h-18 px-3 sm:px-4 md:px-8 flex items-center justify-between shadow-sm sticky top-0 z-30 select-none">
       {/* Title & Time */}
-      <div className="flex items-center gap-3 md:gap-6">
+      <div className="flex items-center gap-1.5 sm:gap-3 md:gap-6 min-w-0">
         {setSidebarOpen && (
           <button
             onClick={() => setSidebarOpen(true)}
-            className="p-2 -ml-1 text-slate-600 hover:bg-slate-100 rounded-xl md:hidden cursor-pointer"
+            className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-xl md:hidden cursor-pointer shrink-0"
             title="Open Menu"
             aria-label="Open Menu"
           >
             <Menu className="w-5 h-5" />
           </button>
         )}
-        <h1 id="navbar-title" className="text-lg md:text-xl font-extrabold text-slate-905 tracking-tight font-sans">
+        <h1 id="navbar-title" className="text-sm xs:text-base sm:text-lg md:text-xl font-extrabold text-slate-905 tracking-tight font-sans truncate">
           {title}
         </h1>
+        {/* Connection status badge */}
+        <div id="db-connection-status-pill" className="flex items-center gap-1.5 bg-slate-50 border border-slate-150 px-2.5 py-1 rounded-lg text-[10px] md:text-xs font-bold text-slate-650 select-none shadow-2xs">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${dbConnected ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
+            <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${dbConnected ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+          </span>
+          <span className="font-sans text-[9px] uppercase tracking-wide font-extrabold">
+            {dbConnected ? 'Oracle DB' : 'Simulasi'}
+          </span>
+        </div>
         {/* Real-time Clock Banner */}
         <div className="hidden lg:flex items-center gap-2 bg-slate-50 border border-slate-150 px-3.5 py-1.5 rounded-xl text-xs font-semibold text-slate-500 font-mono">
           <Clock className="w-3.5 h-3.5 text-blue-500" />
@@ -85,7 +96,7 @@ export default function Navbar({ title, searchQuery, setSearchQuery, setSidebarO
       </div>
 
       {/* Utilities Column */}
-      <div className="flex items-center gap-5">
+      <div className="flex items-center gap-2 sm:gap-5 shrink-0">
         
         {/* Search Input */}
         <div className="relative hidden md:block">
@@ -101,11 +112,11 @@ export default function Navbar({ title, searchQuery, setSearchQuery, setSidebarO
         </div>
 
         {/* Language Toggler */}
-        <div id="language-toggler" className="flex items-center bg-slate-100 border border-slate-200 rounded-xl p-1 shadow-sm">
+        <div id="language-toggler" className="flex items-center bg-slate-100 border border-slate-200 rounded-xl p-0.5 sm:p-1 shadow-sm">
           <button
             id="lang-btn-id"
             onClick={() => setLanguage('id')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+            className={`flex items-center gap-1 px-2 py-1 sm:gap-1.5 sm:px-3 sm:py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${
               language === 'id'
                 ? 'bg-blue-600 text-white shadow-sm'
                 : 'text-slate-500 hover:text-slate-800'
@@ -117,7 +128,7 @@ export default function Navbar({ title, searchQuery, setSearchQuery, setSidebarO
           <button
             id="lang-btn-en"
             onClick={() => setLanguage('en')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+            className={`flex items-center gap-1 px-2 py-1 sm:gap-1.5 sm:px-3 sm:py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${
               language === 'en'
                 ? 'bg-blue-600 text-white shadow-sm'
                 : 'text-slate-500 hover:text-slate-800'

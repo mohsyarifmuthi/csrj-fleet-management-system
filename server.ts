@@ -3,7 +3,6 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
-import oracledb from 'oracledb';
 
 // Initializing configuration
 dotenv.config();
@@ -11,6 +10,179 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
+// ==================== REVERSE PROXY FOR EXTERNAL BACKEND ====================
+let TARGET_API_URL = (process.env.VITE_API_BASE_URL || '').trim();
+
+// Strip quotes from .env
+if ((TARGET_API_URL.startsWith("'") && TARGET_API_URL.endsWith("'")) || 
+    (TARGET_API_URL.startsWith('"') && TARGET_API_URL.endsWith('"'))) {
+  TARGET_API_URL = TARGET_API_URL.slice(1, -1).trim();
+}
+
+// Helper: fetch ke backend
+async function fetchBackend(subPath: string, method: string, body?: Buffer, incomingHeaders?: Record<string, string>) {
+  const targetBase = TARGET_API_URL.endsWith('/') ? TARGET_API_URL.slice(0, -1) : TARGET_API_URL;
+  const url = `${targetBase}${subPath}`;
+  
+  const headers: Record<string, string> = {};
+  if (incomingHeaders) {
+    for (const [key, val] of Object.entries(incomingHeaders)) {
+      if (val && typeof val === 'string') {
+        const lowerKey = key.toLowerCase();
+        if (!['host', 'origin', 'referer', 'content-length', 'connection'].includes(lowerKey)) {
+          headers[key] = val;
+        }
+      }
+    }
+  }
+  
+  const fetchOpts: RequestInit = {
+    method,
+    headers,
+  };
+  
+  if (body && method !== 'GET' && method !== 'HEAD') {
+    fetchOpts.body = body as any;
+  }
+  
+  return fetch(url, fetchOpts);
+}
+
+if (TARGET_API_URL) {
+  console.log(`🔌 Reverse Proxy active! Forwarding /api/* to: ${TARGET_API_URL}`);
+  
+  // Raw parser untuk /api agar body tidak diubah
+  app.use('/api', express.raw({ type: '*/*', limit: '20mb' }));
+  
+  // ===== 1. SPECIAL HANDLER: /api/all-data =====
+  // Kalau backend punya endpoint ini, pakai langsung. Kalau 404, aggregate dari endpoint per-resource.
+  app.get('/api/all-data', async (req, res) => {
+    try {
+      // Coba dulu ke backend langsung
+      const direct = await fetchBackend('/all-data', 'GET', undefined, req.headers as Record<string, string>);
+      
+      if (direct.status === 200) {
+        const buf = Buffer.from(await direct.arrayBuffer());
+        res.status(200).send(buf);
+        console.log(`✅ /api/all-data served directly from backend (${buf.length} bytes)`);
+        return;
+      }
+      
+      // Fallback: aggregate dari endpoint per-resource secara paralel
+      console.log(`⚠️ Backend /all-data returned ${direct.status}, aggregating from individual endpoints...`);
+      
+      const resourceMap = [
+        { key: 'users', paths: ['/users', '/user'] },
+        { key: 'vehicles', paths: ['/vehicles', '/vehicle'] },
+        { key: 'drivers', paths: ['/drivers', '/driver'] },
+        { key: 'maintenanceLogs', paths: ['/maintenance', '/maintenance-logs', '/maintenanceLog'] },
+        { key: 'dailyChecklists', paths: ['/checklists', '/daily-checklists', '/dailyChecklist'] },
+        { key: 'expenses', paths: ['/expenses', '/expense'] },
+        { key: 'activityLogs', paths: ['/activities', '/activity-logs', '/activityLog'] },
+        { key: 'notifications', paths: ['/notifications', '/notification'] },
+      ];
+      
+      const result: any = {};
+      
+      await Promise.all(
+        resourceMap.map(async ({ key, paths }) => {
+          for (const path of paths) {
+            try {
+              const resp = await fetchBackend(path, 'GET', undefined, req.headers as Record<string, string>);
+              if (resp.status === 200) {
+                const data = await resp.json();
+                result[key] = Array.isArray(data) ? data : [data];
+                console.log(`   ✅ ${key}: ${result[key].length} items from ${path}`);
+                return; // next resource
+              }
+            } catch (e) {
+              // coba path alternatif berikutnya
+            }
+          }
+          // Kalau semua path gagal
+          result[key] = [];
+          console.log(`   ⚠️ ${key}: no endpoint found, using empty array`);
+        })
+      );
+      
+      res.json(result);
+      console.log(`✅ /api/all-data aggregated successfully`);
+      
+    } catch (err) {
+      console.error(`❌ Error in /api/all-data aggregation:`, err);
+      res.status(500).json({ error: 'Failed to aggregate data', message: (err as Error).message });
+    }
+  });
+  
+  // ===== 2. SPECIAL HANDLER: /api/database/status =====
+  app.get('/api/database/status', async (req, res) => {
+    try {
+      const ping = await fetchBackend('/vehicles', 'HEAD', undefined, req.headers as Record<string, string>);
+      const isConnected = ping && (ping.status === 200 || ping.status === 204);
+      
+      res.json({
+        connected: isConnected,
+        provider: isConnected ? 'External Spring Boot Backend' : 'Unavailable',
+        configured: true,
+        url: TARGET_API_URL,
+        timestamp: new Date().toISOString()
+      });
+      
+      console.log(`✅ /api/database/status: ${isConnected ? 'CONNECTED' : 'DISCONNECTED'}`);
+      
+    } catch (err) {
+      res.json({
+        connected: false,
+        provider: 'Error',
+        configured: true,
+        url: TARGET_API_URL,
+        error: (err as Error).message,
+        timestamp: new Date().toISOString()
+      });
+      console.error(`❌ /api/database/status error:`, err);
+    }
+  });
+  
+  // ===== 3. CATCH-ALL PROXY untuk endpoint lain =====
+  app.all('/api/*', async (req, res) => {
+    try {
+      const subPath = req.originalUrl.replace(/^\/api/, '');
+      const destinationUrl = `${TARGET_API_URL.endsWith('/') ? TARGET_API_URL.slice(0, -1) : TARGET_API_URL}${subPath}`;
+      
+      console.log(`🔀 [${req.method}] ${req.originalUrl} → ${destinationUrl}`);
+      
+      const response = await fetchBackend(subPath, req.method, Buffer.isBuffer(req.body) ? req.body : undefined, req.headers as Record<string, string>);
+      
+      // Forward status dan headers
+      res.status(response.status);
+      response.headers.forEach((val, key) => {
+        const lowerKey = key.toLowerCase();
+        if (!['content-encoding', 'transfer-encoding', 'connection'].includes(lowerKey)) {
+          res.setHeader(key, val);
+        }
+      });
+      
+      const buf = Buffer.from(await response.arrayBuffer());
+      
+      if (response.status < 200 || response.status >= 300) {
+        console.error(`❌ Backend ${response.status}: ${buf.toString('utf8').substring(0, 500)}`);
+      } else {
+        console.log(`✅ Proxied ${buf.length} bytes (${response.status})`);
+      }
+      
+      res.send(buf);
+      
+    } catch (err) {
+      console.error(`❌ Proxy failure for ${req.originalUrl}:`, err);
+      res.status(502).json({
+        error: 'Proxy failed to delegate request',
+        message: (err as Error).message || String(err)
+      });
+    }
+  });
+}
+
+// Fallback to local body parser for mock API
 app.use(express.json());
 
 // Path to persistent fallback JSON storage
@@ -19,7 +191,7 @@ const DB_FILE = path.join(DATA_DIR, 'db.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR);
+  fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
 // Default initial simulation seed data matching initial React state
@@ -84,7 +256,6 @@ if (!fs.existsSync(DB_FILE)) {
   fs.writeFileSync(DB_FILE, JSON.stringify(INITIAL_DB, null, 2));
 }
 
-// Read local JSON helper
 function readLocalDB() {
   try {
     const raw = fs.readFileSync(DB_FILE, 'utf-8');
@@ -94,7 +265,6 @@ function readLocalDB() {
   }
 }
 
-// Write local JSON helper
 function writeLocalDB(data: any) {
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
@@ -103,586 +273,154 @@ function writeLocalDB(data: any) {
   }
 }
 
-// --- ORACLE DATABASE INTEGRATION STUFF ---
-let oracleConnectionPool: oracledb.Pool | null = null;
-let isOracleActive = false;
-
-async function syncWithOracle(dataType: string, id: string, entityData: any, operationType: 'INSERT' | 'UPDATE' | 'DELETE') {
-  if (!isOracleActive || !oracleConnectionPool) return;
-
-  let connection;
-  try {
-    connection = await oracleConnectionPool.getConnection();
-    
-    // Select SQL operation based on data types
-    if (dataType === 'vehicles') {
-      if (operationType === 'DELETE') {
-        await connection.execute(`DELETE FROM T_VEHICLES WHERE ID = :id`, [id], { autoCommit: true });
-      } else if (operationType === 'INSERT') {
-        const sql = `INSERT INTO T_VEHICLES (ID, PLATE_NUMBER, MODEL, YEAR, COLOR, MILEAGE, STATUS, DRIVER_NAME, DRIVER_ID, CHASSIS_NUMBER) 
-                     VALUES (:id, :plateNumber, :model, :year, :color, :mileage, :status, :driverName, :driverId, :chassisNumber)`;
-        await connection.execute(sql, {
-          id,
-          plateNumber: entityData.plateNumber,
-          model: entityData.model,
-          year: Number(entityData.year),
-          color: entityData.color,
-          mileage: Number(entityData.mileage),
-          status: entityData.status,
-          driverName: entityData.driverName || '',
-          driverId: entityData.driverId || '',
-          chassisNumber: entityData.chassisNumber || ''
-        }, { autoCommit: true });
-      } else if (operationType === 'UPDATE') {
-        const sql = `UPDATE T_VEHICLES SET PLATE_NUMBER = :plateNumber, MODEL = :model, YEAR = :year, COLOR = :color, 
-                     MILEAGE = :mileage, STATUS = :status, DRIVER_NAME = :driverName, DRIVER_ID = :driverId, 
-                     CHASSIS_NUMBER = :chassisNumber WHERE ID = :id`;
-        await connection.execute(sql, {
-          id,
-          plateNumber: entityData.plateNumber,
-          model: entityData.model,
-          year: Number(entityData.year),
-          color: entityData.color,
-          mileage: Number(entityData.mileage),
-          status: entityData.status,
-          driverName: entityData.driverName || '',
-          driverId: entityData.driverId || '',
-          chassisNumber: entityData.chassisNumber || ''
-        }, { autoCommit: true });
-      }
-    } else if (dataType === 'drivers') {
-      if (operationType === 'DELETE') {
-        await connection.execute(`DELETE FROM T_DRIVERS WHERE ID = :id`, [id], { autoCommit: true });
-      } else if (operationType === 'INSERT') {
-        const sql = `INSERT INTO T_DRIVERS (ID, NAME, PHONE, SIM_NUMBER, SIM_EXPIRY, ASSIGNED_VEHICLE_PLATE, STATUS, ACCOUNT_EMAIL, AVATAR_TEXT) 
-                     VALUES (:id, :name, :phone, :simNumber, :simExpiry, :assignedVehiclePlate, :status, :accountEmail, :avatarText)`;
-        await connection.execute(sql, {
-          id,
-          name: entityData.name,
-          phone: entityData.phone,
-          simNumber: entityData.simNumber,
-          simExpiry: entityData.simExpiry,
-          assignedVehiclePlate: entityData.assignedVehiclePlate || '',
-          status: entityData.status,
-          accountEmail: entityData.accountEmail || '',
-          avatarText: entityData.avatarText || 'DR'
-        }, { autoCommit: true });
-      } else if (operationType === 'UPDATE') {
-        const sql = `UPDATE T_DRIVERS SET NAME = :name, PHONE = :phone, SIM_NUMBER = :simNumber, SIM_EXPIRY = :simExpiry, 
-                     ASSIGNED_VEHICLE_PLATE = :assignedVehiclePlate, STATUS = :status, ACCOUNT_EMAIL = :accountEmail, 
-                     AVATAR_TEXT = :avatarText WHERE ID = :id`;
-        await connection.execute(sql, {
-          id,
-          name: entityData.name,
-          phone: entityData.phone,
-          simNumber: entityData.simNumber,
-          simExpiry: entityData.simExpiry,
-          assignedVehiclePlate: entityData.assignedVehiclePlate || '',
-          status: entityData.status,
-          accountEmail: entityData.accountEmail || '',
-          avatarText: entityData.avatarText || 'DR'
-        }, { autoCommit: true });
-      }
-    } else if (dataType === 'maintenanceLogs') {
-      if (operationType === 'DELETE') {
-        await connection.execute(`DELETE FROM T_MAINTENANCE WHERE ID = :id`, [id], { autoCommit: true });
-      } else if (operationType === 'INSERT') {
-        const sql = `INSERT INTO T_MAINTENANCE (ID, VEHICLE_PLATE, VEHICLE_MODEL, SERVICE_TYPE, LOG_DATE, COST, WORKSHOP, STATUS, NOTES) 
-                     VALUES (:id, :vehiclePlate, :vehicleModel, :serviceType, :log_date, :cost, :workshop, :status, :notes)`;
-        await connection.execute(sql, {
-          id,
-          vehiclePlate: entityData.vehiclePlate,
-          vehicleModel: entityData.vehicleModel,
-          serviceType: entityData.serviceType,
-          log_date: entityData.date,
-          cost: Number(entityData.cost),
-          workshop: entityData.workshop,
-          status: entityData.status,
-          notes: entityData.notes || ''
-        }, { autoCommit: true });
-      } else if (operationType === 'UPDATE') {
-        const sql = `UPDATE T_MAINTENANCE SET VEHICLE_PLATE = :vehiclePlate, VEHICLE_MODEL = :vehicleModel, SERVICE_TYPE = :serviceType, 
-                     LOG_DATE = :log_date, COST = :cost, WORKSHOP = :workshop, STATUS = :status, NOTES = :notes WHERE ID = :id`;
-        await connection.execute(sql, {
-          id,
-          vehiclePlate: entityData.vehiclePlate,
-          vehicleModel: entityData.vehicleModel,
-          serviceType: entityData.serviceType,
-          log_date: entityData.date,
-          cost: Number(entityData.cost),
-          workshop: entityData.workshop,
-          status: entityData.status,
-          notes: entityData.notes || ''
-        }, { autoCommit: true });
-      }
-    } else if (dataType === 'dailyChecklists') {
-      if (operationType === 'INSERT') {
-        const sql = `INSERT INTO T_DAILY_CHECKLISTS (ID, VEHICLE_PLATE, DRIVER_NAME, LOG_DATE, LOG_TIME, RESULTS_JSON, NOTES, STATUS) 
-                     VALUES (:id, :vehiclePlate, :driverName, :log_date, :log_time, :resultsJson, :notes, :status)`;
-        await connection.execute(sql, {
-          id,
-          vehiclePlate: entityData.vehiclePlate,
-          driverName: entityData.driverName,
-          log_date: entityData.date,
-          log_time: entityData.time,
-          resultsJson: JSON.stringify(entityData.results),
-          notes: entityData.notes || '',
-          status: entityData.status
-        }, { autoCommit: true });
-      }
-    } else if (dataType === 'expenses') {
-      if (operationType === 'DELETE') {
-        await connection.execute(`DELETE FROM T_EXPENSES WHERE ID = :id`, [id], { autoCommit: true });
-      } else if (operationType === 'INSERT') {
-        const sql = `INSERT INTO T_EXPENSES (ID, EXPENSE_DATE, VEHICLE_PLATE, CATEGORY, DESCRIPTION, AMOUNT, DRIVER_NAME, PASSENGER, START_LOCATION, DESTINATION, DEPARTURE_TIME, RETURN_TIME) 
-                     VALUES (:id, :expenseDate, :vehiclePlate, :category, :description, :amount, :driverName, :passenger, :startLocation, :destination, :departureTime, :returnTime)`;
-        await connection.execute(sql, {
-          id,
-          expenseDate: entityData.date,
-          vehiclePlate: entityData.vehiclePlate,
-          category: entityData.category,
-          description: entityData.description,
-          amount: Number(entityData.amount),
-          driverName: entityData.driverName,
-          passenger: entityData.passenger || '',
-          startLocation: entityData.startLocation || '',
-          destination: entityData.destination || '',
-          departureTime: entityData.departureTime || '',
-          returnTime: entityData.returnTime || ''
-        }, { autoCommit: true });
-      }
-    } else if (dataType === 'activityLogs') {
-      if (operationType === 'INSERT') {
-        const sql = `INSERT INTO T_ACTIVITY_LOGS (ID, USERNAME, USER_ROLE, ACTION_DONE, DETAILS, TIMESTAMP_STR) 
-                     VALUES (:id, :username, :userRole, :actionDone, :details, :timestampStr)`;
-        await connection.execute(sql, {
-          id,
-          username: entityData.username,
-          userRole: entityData.role,
-          actionDone: entityData.action,
-          details: entityData.details,
-          timestampStr: entityData.timestamp
-        }, { autoCommit: true });
-      }
-    } else if (dataType === 'notifications') {
-      if (operationType === 'UPDATE') {
-        const sql = `UPDATE T_NOTIFICATIONS SET READ_STATUS = :readStatus WHERE ID = :id`;
-        await connection.execute(sql, {
-          id,
-          readStatus: entityData.read ? 1 : 0
-        }, { autoCommit: true });
-      }
-    }
-
-    console.log(`Oracle successfully synced: [${operationType}] ${dataType} (ID: ${id})`);
-  } catch (err) {
-    console.error(`Error syncing with Oracle Database for ${dataType}:`, err);
-  } finally {
-    if (connection) {
-      try {
-        await connection.close();
-      } catch (err) {
-        console.error('Error closing Oracledb connection:', err);
-      }
-    }
-  }
-}
-
-async function bootstrapTables() {
-  if (!oracleConnectionPool) return;
-  let connection;
-  try {
-    connection = await oracleConnectionPool.getConnection();
-
-    // 1. Vehicles
-    try {
-      await connection.execute(`SELECT 1 FROM T_VEHICLES WHERE ROWNUM = 1`);
-    } catch {
-      console.log('Creating Table: T_VEHICLES...');
-      await connection.execute(`
-        CREATE TABLE T_VEHICLES (
-          ID VARCHAR2(100) PRIMARY KEY,
-          PLATE_NUMBER VARCHAR2(50) NOT NULL,
-          MODEL VARCHAR2(100),
-          YEAR NUMBER,
-          COLOR VARCHAR2(50),
-          MILEAGE NUMBER,
-          STATUS VARCHAR2(50),
-          DRIVER_NAME VARCHAR2(100),
-          DRIVER_ID VARCHAR2(100),
-          CHASSIS_NUMBER VARCHAR2(100)
-        )
-      `);
-    }
-
-    // 2. Drivers
-    try {
-      await connection.execute(`SELECT 1 FROM T_DRIVERS WHERE ROWNUM = 1`);
-    } catch {
-      console.log('Creating Table: T_DRIVERS...');
-      await connection.execute(`
-        CREATE TABLE T_DRIVERS (
-          ID VARCHAR2(100) PRIMARY KEY,
-          NAME VARCHAR2(100) NOT NULL,
-          PHONE VARCHAR2(50),
-          SIM_NUMBER VARCHAR2(100),
-          SIM_EXPIRY VARCHAR2(50),
-          ASSIGNED_VEHICLE_PLATE VARCHAR2(50),
-          STATUS VARCHAR2(50),
-          ACCOUNT_EMAIL VARCHAR2(100),
-          AVATAR_TEXT VARCHAR2(20)
-        )
-      `);
-    }
-
-    // 3. Maintenance Logs
-    try {
-      await connection.execute(`SELECT 1 FROM T_MAINTENANCE WHERE ROWNUM = 1`);
-    } catch {
-      console.log('Creating Table: T_MAINTENANCE...');
-      await connection.execute(`
-        CREATE TABLE T_MAINTENANCE (
-          ID VARCHAR2(100) PRIMARY KEY,
-          VEHICLE_PLATE VARCHAR2(50) NOT NULL,
-          VEHICLE_MODEL VARCHAR2(100),
-          SERVICE_TYPE VARCHAR2(50),
-          LOG_DATE VARCHAR2(50),
-          COST NUMBER,
-          WORKSHOP VARCHAR2(150),
-          STATUS VARCHAR2(50),
-          NOTES CLOB
-        )
-      `);
-    }
-
-    // 4. Daily Checklists
-    try {
-      await connection.execute(`SELECT 1 FROM T_DAILY_CHECKLISTS WHERE ROWNUM = 1`);
-    } catch {
-      console.log('Creating Table: T_DAILY_CHECKLISTS...');
-      await connection.execute(`
-        CREATE TABLE T_DAILY_CHECKLISTS (
-          ID VARCHAR2(100) PRIMARY KEY,
-          VEHICLE_PLATE VARCHAR2(50) NOT NULL,
-          DRIVER_NAME VARCHAR2(100),
-          LOG_DATE VARCHAR2(50),
-          LOG_TIME VARCHAR2(50),
-          RESULTS_JSON CLOB,
-          NOTES CLOB,
-          STATUS VARCHAR2(50)
-        )
-      `);
-    }
-
-    // 5. Expenses
-    try {
-      await connection.execute(`SELECT 1 FROM T_EXPENSES WHERE ROWNUM = 1`);
-    } catch {
-      console.log('Creating Table: T_EXPENSES...');
-      await connection.execute(`
-        CREATE TABLE T_EXPENSES (
-          ID VARCHAR2(100) PRIMARY KEY,
-          EXPENSE_DATE VARCHAR2(50),
-          VEHICLE_PLATE VARCHAR2(50),
-          CATEGORY VARCHAR2(50),
-          DESCRIPTION VARCHAR2(200),
-          AMOUNT NUMBER,
-          DRIVER_NAME VARCHAR2(100),
-          PASSENGER VARCHAR2(200),
-          START_LOCATION VARCHAR2(200),
-          DESTINATION VARCHAR2(200),
-          DEPARTURE_TIME VARCHAR2(50),
-          RETURN_TIME VARCHAR2(50)
-        )
-      `);
-    }
-
-    // Resilient schema update for existing T_EXPENSES table
-    try {
-      await connection.execute(`SELECT PASSENGER FROM T_EXPENSES WHERE ROWNUM = 1`);
-    } catch {
-      try {
-        console.log('Altering T_EXPENSES to add travel columns...');
-        await connection.execute(`ALTER TABLE T_EXPENSES ADD PASSENGER VARCHAR2(200)`);
-        await connection.execute(`ALTER TABLE T_EXPENSES ADD START_LOCATION VARCHAR2(200)`);
-        await connection.execute(`ALTER TABLE T_EXPENSES ADD DESTINATION VARCHAR2(200)`);
-        await connection.execute(`ALTER TABLE T_EXPENSES ADD DEPARTURE_TIME VARCHAR2(50)`);
-        await connection.execute(`ALTER TABLE T_EXPENSES ADD RETURN_TIME VARCHAR2(50)`);
-      } catch (altErr) {
-        console.log('Dual-layer warning: Travel columns could not be dynamically created (might exist):', altErr);
-      }
-    }
-
-    // 6. Activity Logs
-    try {
-      await connection.execute(`SELECT 1 FROM T_ACTIVITY_LOGS WHERE ROWNUM = 1`);
-    } catch {
-      console.log('Creating Table: T_ACTIVITY_LOGS...');
-      await connection.execute(`
-        CREATE TABLE T_ACTIVITY_LOGS (
-          ID VARCHAR2(100) PRIMARY KEY,
-          USERNAME VARCHAR2(100),
-          USER_ROLE VARCHAR2(50),
-          ACTION_DONE VARCHAR2(100),
-          DETAILS VARCHAR2(250),
-          TIMESTAMP_STR VARCHAR2(100)
-        )
-      `);
-    }
-
-    // 7. Notifications
-    try {
-      await connection.execute(`SELECT 1 FROM T_NOTIFICATIONS WHERE ROWNUM = 1`);
-    } catch {
-      console.log('Creating Table: T_NOTIFICATIONS...');
-      await connection.execute(`
-        CREATE TABLE T_NOTIFICATIONS (
-          ID VARCHAR2(100) PRIMARY KEY,
-          TYPE VARCHAR2(50),
-          TITLE VARCHAR2(150),
-          MESSAGE VARCHAR2(250),
-          NOTIF_DATE VARCHAR2(50),
-          VEHICLE_PLATE VARCHAR2(50),
-          READ_STATUS NUMBER(1) DEFAULT 0
-        )
-      `);
-    }
-
-    console.log('✅ Semua tabel Oracle Database siap dan terverifikasi.');
-
-  } catch (err) {
-    console.error('Error bootstrapping tables in Oracle DB:', err);
-  } finally {
-    if (connection) {
-      await connection.close();
-    }
-  }
-}
-
-async function initOracle() {
-  const user = process.env.ORACLE_DB_USER;
-  const password = process.env.ORACLE_DB_PASSWORD;
-  const connectString = process.env.ORACLE_DB_CONNECT_STRING;
-
-  if (!user || !password || !connectString) {
-    console.log('⚠️  Info penting: Konfigurasi Oracle (.env) belum lengkap.');
-    console.log('👉 Sistem beralih ke local JSON file database (/data/db.json) untuk kelancaran preview.');
-    return;
-  }
-
-  try {
-    // node-oracledb operates in Thin client mode automatically in v6+ (pure JS, no instant client required)
-    oracleConnectionPool = await oracledb.createPool({
-      user,
-      password,
-      connectString,
-      poolMin: 1,
-      poolMax: 5,
-      poolIncrement: 1
-    });
-
-    isOracleActive = true;
-    console.log('⚡ Sukses terkoneksi ke Oracle Database menggunakan Thin Mode (100% JS).');
-    await bootstrapTables();
-  } catch (err) {
-    console.error('❌ Gagal menyambung ke Oracle Database:', err);
-    console.log('👉 Sistem beralih ke local JSON file database (/data/db.json) untuk kelancaran preview.');
-  }
-}
-
-// Initialize connections
-initOracle();
-
-// --- REST API Proxy Endpoints ---
-
-// Check database status
+// 0. GET /api/database/status fallback
 app.get('/api/database/status', (req, res) => {
   res.json({
-    connected: isOracleActive,
-    provider: isOracleActive ? 'Oracle Database (Thin Mode)' : 'Local File Storage (data/db.json)',
-    environmentSet: !!(process.env.ORACLE_DB_USER && process.env.ORACLE_DB_PASSWORD && process.env.ORACLE_DB_CONNECT_STRING)
+    connected: false,
+    provider: 'Local Fallback JSON File',
+    configured: false
   });
 });
 
-// Get completely consolidated database state
+// 1. GET /api/all-data fallback
 app.get('/api/all-data', (req, res) => {
   const db = readLocalDB();
   res.json(db);
 });
 
-// Update standard full schema or discrete components
+// 2. SAVING BULK STATE fallback
 app.post('/api/state/save', (req, res) => {
-  const incomingData = req.body;
-  writeLocalDB(incomingData);
-  res.json({ success: true, message: 'Local DB updated' });
+  const fields = req.body;
+  const db = readLocalDB();
+  const next = { ...db, ...fields };
+  writeLocalDB(next);
+  res.json({ success: true });
 });
 
-// Specific CRUD operations for vehicles
-app.post('/api/vehicles', async (req, res) => {
+// 3. VEHICLE CRUD fallback
+app.post('/api/vehicles', (req, res) => {
   const vehicle = req.body;
   const db = readLocalDB();
   db.vehicles = [vehicle, ...db.vehicles];
   writeLocalDB(db);
-
-  await syncWithOracle('vehicles', vehicle.id, vehicle, 'INSERT');
   res.json({ success: true, entity: vehicle });
 });
 
-app.put('/api/vehicles/:id', async (req, res) => {
+app.put('/api/vehicles/:id', (req, res) => {
   const id = req.params.id;
   const fields = req.body;
   const db = readLocalDB();
   db.vehicles = db.vehicles.map((v: any) => v.id === id ? { ...v, ...fields } : v);
   writeLocalDB(db);
-
-  const updated = db.vehicles.find((v: any) => v.id === id);
-  if (updated) {
-    await syncWithOracle('vehicles', id, updated, 'UPDATE');
-  }
-  res.json({ success: true, entity: updated });
+  res.json({ success: true, entity: db.vehicles.find((v: any) => v.id === id) });
 });
 
-app.delete('/api/vehicles/:id', async (req, res) => {
+app.delete('/api/vehicles/:id', (req, res) => {
   const id = req.params.id;
   const db = readLocalDB();
   db.vehicles = db.vehicles.filter((v: any) => v.id !== id);
   writeLocalDB(db);
-
-  await syncWithOracle('vehicles', id, null, 'DELETE');
   res.json({ success: true, id });
 });
 
-// Specific CRUD operations for drivers
-app.post('/api/drivers', async (req, res) => {
+// 4. DRIVER CRUD fallback
+app.post('/api/drivers', (req, res) => {
   const driver = req.body;
   const db = readLocalDB();
   db.drivers = [driver, ...db.drivers];
   writeLocalDB(db);
-
-  await syncWithOracle('drivers', driver.id, driver, 'INSERT');
   res.json({ success: true, entity: driver });
 });
 
-app.put('/api/drivers/:id', async (req, res) => {
+app.put('/api/drivers/:id', (req, res) => {
   const id = req.params.id;
   const fields = req.body;
   const db = readLocalDB();
   db.drivers = db.drivers.map((d: any) => d.id === id ? { ...d, ...fields } : d);
   writeLocalDB(db);
-
-  const updated = db.drivers.find((d: any) => d.id === id);
-  if (updated) {
-    await syncWithOracle('drivers', id, updated, 'UPDATE');
-  }
-  res.json({ success: true, entity: updated });
+  res.json({ success: true, entity: db.drivers.find((d: any) => d.id === id) });
 });
 
-app.delete('/api/drivers/:id', async (req, res) => {
+app.delete('/api/drivers/:id', (req, res) => {
   const id = req.params.id;
   const db = readLocalDB();
   db.drivers = db.drivers.filter((d: any) => d.id !== id);
   writeLocalDB(db);
-
-  await syncWithOracle('drivers', id, null, 'DELETE');
   res.json({ success: true, id });
 });
 
-// Specific CRUD operations for maintenance
-app.post('/api/maintenance', async (req, res) => {
+// 5. MAINTENANCE CRUD fallback
+app.post('/api/maintenance', (req, res) => {
   const log = req.body;
   const db = readLocalDB();
   db.maintenanceLogs = [log, ...db.maintenanceLogs];
   writeLocalDB(db);
-
-  await syncWithOracle('maintenanceLogs', log.id, log, 'INSERT');
   res.json({ success: true, entity: log });
 });
 
-app.put('/api/maintenance/:id', async (req, res) => {
+app.put('/api/maintenance/:id', (req, res) => {
   const id = req.params.id;
   const fields = req.body;
   const db = readLocalDB();
   db.maintenanceLogs = db.maintenanceLogs.map((m: any) => m.id === id ? { ...m, ...fields } : m);
   writeLocalDB(db);
-
-  const updated = db.maintenanceLogs.find((m: any) => m.id === id);
-  if (updated) {
-    await syncWithOracle('maintenanceLogs', id, updated, 'UPDATE');
-  }
-  res.json({ success: true, entity: updated });
+  res.json({ success: true, entity: db.maintenanceLogs.find((m: any) => m.id === id) });
 });
 
-app.delete('/api/maintenance/:id', async (req, res) => {
+app.delete('/api/maintenance/:id', (req, res) => {
   const id = req.params.id;
   const db = readLocalDB();
   db.maintenanceLogs = db.maintenanceLogs.filter((m: any) => m.id !== id);
   writeLocalDB(db);
-
-  await syncWithOracle('maintenanceLogs', id, null, 'DELETE');
   res.json({ success: true, id });
 });
 
-// Specific operations for daily checklist
-app.post('/api/checklists', async (req, res) => {
+// 6. CHECKLISTS SUBMISSION fallback
+app.post('/api/checklists', (req, res) => {
   const checklist = req.body;
   const db = readLocalDB();
   db.dailyChecklists = [checklist, ...db.dailyChecklists];
   writeLocalDB(db);
-
-  await syncWithOracle('dailyChecklists', checklist.id, checklist, 'INSERT');
   res.json({ success: true, entity: checklist });
 });
 
-// Specific operations for expenses
-app.post('/api/expenses', async (req, res) => {
+// 7. EXPENSES CRUD fallback
+app.post('/api/expenses', (req, res) => {
   const expense = req.body;
   const db = readLocalDB();
   db.expenses = [expense, ...db.expenses];
   writeLocalDB(db);
-
-  await syncWithOracle('expenses', expense.id, expense, 'INSERT');
   res.json({ success: true, entity: expense });
 });
 
-app.delete('/api/expenses/:id', async (req, res) => {
+app.delete('/api/expenses/:id', (req, res) => {
   const id = req.params.id;
   const db = readLocalDB();
   db.expenses = db.expenses.filter((e: any) => e.id !== id);
   writeLocalDB(db);
-
-  await syncWithOracle('expenses', id, null, 'DELETE');
   res.json({ success: true, id });
 });
 
-// Notifications update
-app.put('/api/notifications/:id', async (req, res) => {
+// 8. NOTIFICATIONS update fallback
+app.put('/api/notifications/:id', (req, res) => {
   const id = req.params.id;
   const fields = req.body;
   const db = readLocalDB();
   db.notifications = db.notifications.map((n: any) => n.id === id ? { ...n, ...fields } : n);
   writeLocalDB(db);
-
-  const updated = db.notifications.find((n: any) => n.id === id);
-  if (updated) {
-    await syncWithOracle('notifications', id, updated, 'UPDATE');
-  }
-  res.json({ success: true, entity: updated });
+  res.json({ success: true, entity: db.notifications.find((n: any) => n.id === id) });
 });
 
-// Handle logs activity creation in Oracle
-app.post('/api/activities', async (req, res) => {
+// 9. ACTIVITIES creation fallback
+app.post('/api/activities', (req, res) => {
   const activity = req.body;
   const db = readLocalDB();
   db.activityLogs = [activity, ...db.activityLogs];
   writeLocalDB(db);
-
-  await syncWithOracle('activityLogs', activity.id, activity, 'INSERT');
   res.json({ success: true, entity: activity });
 });
 
 // --- CLIENT SERVER INTERACTION & STATIC SERVING ---
-
-// Vite Integration
 async function startAppServer() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -699,7 +437,8 @@ async function startAppServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 CSRJ Fleet Full-Stack Server Running on http://localhost:${PORT}`);
+    console.log(`🚀 CSRJ Fleet Server running nicely on port ${PORT}`);
+    console.log(`💡 DB connections freed up. Direct integrations point to VITE_API_BASE_URL context.`);
   });
 }
 

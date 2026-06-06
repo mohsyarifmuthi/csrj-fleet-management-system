@@ -16,6 +16,25 @@ import {
   CheckItemStatus
 } from '../types';
 
+// We route all API requests relatively through our own Node.js server.
+// Our Express server on port 3000 proxies requests to high-level external environments (like VITE_API_BASE_URL via ngrok),
+// completely bypassing CORS roadblocks and ngrok warning interceptors.
+const API_BASE_URL = '';
+
+function fetchApi(input: string, init?: RequestInit) {
+  const cleanInput = input.startsWith('/') ? input : `/${input}`;
+  const finalUrl = `${cleanInput}`;
+  
+  console.log(`🌐 Calling Proxy API: ${finalUrl}`);
+
+  const newInit = { ...init };
+  const headers = new Headers(newInit.headers || {});
+  headers.set('Content-Type', 'application/json');
+  newInit.headers = headers;
+
+  return fetch(finalUrl, newInit);
+}
+
 interface DatabaseContextProps {
   currentUser: User | null;
   users: User[];
@@ -27,6 +46,14 @@ interface DatabaseContextProps {
   activityLogs: ActivityLog[];
   notifications: AlertNotification[];
   isLoading: boolean;
+  
+  // Diagnostic state
+  dbConnected: boolean | null;
+  dbProvider: string;
+  dbConfigured: boolean;
+  apiBaseUrl: string;
+  dbError: string | null;
+  refreshData: () => void;
   
   // Auth actions
   login: (email: string, role: UserRole) => Promise<boolean>;
@@ -201,19 +228,47 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [language, setLanguage] = useState<'id' | 'en'>('id');
 
-  // Load database from backend API on initialization
-  useEffect(() => {
-    // Session parameters (safely held locally)
-    const localUser = localStorage.getItem('csrj_current_user');
-    const localLang = localStorage.getItem('csrj_language');
+  // Diagnostic state
+  const [dbConnected, setDbConnected] = useState<boolean | null>(null);
+  const [dbProvider, setDbProvider] = useState<string>('Unchecked');
+  const [dbConfigured, setDbConfigured] = useState<boolean>(false);
+  const [apiBaseUrl, setApiBaseUrl] = useState<string>('');
+  const [dbError, setDbError] = useState<string | null>(null);
 
-    if (localUser) setCurrentUser(JSON.parse(localUser));
-    if (localLang) setLanguage(localLang as 'id' | 'en');
+  // Checks database and proxy status
+  const checkDbStatus = () => {
+    setApiBaseUrl((import.meta as any).env?.VITE_API_BASE_URL || 'Local Container Only');
+    fetchApi('/api/database/status')
+      .then(async res => {
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`HTTP ${res.status}: ${text || 'Failed to communicate with proxy'}`);
+        }
+        return res.json();
+      })
+      .then(statusData => {
+        setDbConnected(statusData.connected);
+        setDbProvider(statusData.provider || 'Local Fallback JSON File');
+        setDbConfigured(statusData.configured || false);
+        setDbError(null);
+      })
+      .catch(err => {
+        console.error('Failed to query database status proxy:', err);
+        setDbConnected(false);
+        setDbProvider('Reverse Proxy Error');
+        setDbError(err.message || 'Error connecting to proxy');
+      });
+  };
 
+  const refreshData = () => {
     setIsLoading(true);
-    fetch('/api/all-data')
-      .then(res => {
-        if (!res.ok) throw new Error('API server unreachable');
+    checkDbStatus();
+    fetchApi('/api/all-data')
+      .then(async res => {
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`Endpoint /api/all-data returned HTTP ${res.status}. ${text ? text.substring(0, 80) : ''}`);
+        }
         return res.json();
       })
       .then(data => {
@@ -222,13 +277,23 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
         if (data.drivers) setDrivers(data.drivers);
         if (data.maintenanceLogs) setMaintenanceLogs(data.maintenanceLogs);
         if (data.dailyChecklists) setDailyChecklists(data.dailyChecklists);
-        if (data.expenses) setExpenses(data.expenses);
+        if (data.expenses) {
+          const mappedExpenses = data.expenses.map((e: any) => ({
+            ...e,
+            receiptPhoto: e.receiptPhoto || e.receipt_photo
+          }));
+          setExpenses(mappedExpenses);
+        }
         if (data.activityLogs) setActivityLogs(data.activityLogs);
         if (data.notifications) setNotifications(data.notifications);
+        setDbError(null);
         setIsLoading(false);
       })
       .catch(err => {
         console.error('Failed to load fleet data from backend, using local fallback:', err);
+        setDbError(err.message || 'Error receiving payload from proxy');
+        
+        // Fall back to localStorage if offline, or defaults
         const localVehicles = localStorage.getItem('csrj_vehicles');
         const localDrivers = localStorage.getItem('csrj_drivers');
         const localMaintenance = localStorage.getItem('csrj_maintenance');
@@ -247,7 +312,32 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
         
         setIsLoading(false);
       });
+  };
+
+  // Load database from backend API on initialization
+  useEffect(() => {
+    // Session parameters (safely held locally)
+    const localUser = localStorage.getItem('csrj_current_user');
+    const localLang = localStorage.getItem('csrj_language');
+
+    if (localUser) setCurrentUser(JSON.parse(localUser));
+    if (localLang) setLanguage(localLang as 'id' | 'en');
+
+    refreshData();
   }, []);
+
+  // Sync state changes with localStorage for instant backup
+  useEffect(() => {
+    if (!isLoading) {
+      localStorage.setItem('csrj_vehicles', JSON.stringify(vehicles));
+      localStorage.setItem('csrj_drivers', JSON.stringify(drivers));
+      localStorage.setItem('csrj_maintenance', JSON.stringify(maintenanceLogs));
+      localStorage.setItem('csrj_checklists', JSON.stringify(dailyChecklists));
+      localStorage.setItem('csrj_expenses', JSON.stringify(expenses));
+      localStorage.setItem('csrj_logs', JSON.stringify(activityLogs));
+      localStorage.setItem('csrj_notifications', JSON.stringify(notifications));
+    }
+  }, [vehicles, drivers, maintenanceLogs, dailyChecklists, expenses, activityLogs, notifications, isLoading]);
 
   const logActivity = (action: string, details: string) => {
     const newLog: ActivityLog = {
@@ -261,7 +351,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     
     setActivityLogs(prev => [newLog, ...prev]);
 
-    fetch('/api/activities', {
+    fetchApi('/api/activities', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newLog)
@@ -288,7 +378,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
       };
       setUsers(prev => {
         const next = [...prev, matchedUser!];
-        fetch('/api/state/save', {
+        fetchApi('/api/state/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ users: next })
@@ -312,7 +402,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     };
     
     setActivityLogs(prev => [newLog, ...prev]);
-    fetch('/api/activities', {
+    fetchApi('/api/activities', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newLog)
@@ -349,7 +439,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     };
     
     setActivityLogs(prev => [newLog, ...prev]);
-    fetch('/api/activities', {
+    fetchApi('/api/activities', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newLog)
@@ -374,7 +464,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     
     setVehicles(prev => [newV, ...prev]);
     
-    fetch('/api/vehicles', {
+    fetchApi('/api/vehicles', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newV)
@@ -386,7 +476,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
   const updateVehicle = (id: string, updatedFields: Partial<Vehicle>) => {
     setVehicles(prev => prev.map(v => v.id === id ? { ...v, ...updatedFields } : v));
     
-    fetch(`/api/vehicles/${id}`, {
+    fetchApi(`/api/vehicles/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedFields)
@@ -400,7 +490,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     const original = vehicles.find(v => v.id === id);
     setVehicles(prev => prev.filter(v => v.id !== id));
     
-    fetch(`/api/vehicles/${id}`, {
+    fetchApi(`/api/vehicles/${id}`, {
       method: 'DELETE'
     }).catch(err => console.error(err));
 
@@ -418,7 +508,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     
     setDrivers(prev => [newD, ...prev]);
 
-    fetch('/api/drivers', {
+    fetchApi('/api/drivers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newD)
@@ -432,7 +522,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
         // Sync vehicle plate assignment change
         const targetV = next.find(v => v.plateNumber === newD.assignedVehiclePlate);
         if (targetV) {
-          fetch(`/api/vehicles/${targetV.id}`, {
+          fetchApi(`/api/vehicles/${targetV.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ driverName: newD.name })
@@ -448,7 +538,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     
     setDrivers(prev => prev.map(d => d.id === id ? { ...d, ...updatedFields } : d));
 
-    fetch(`/api/drivers/${id}`, {
+    fetchApi(`/api/drivers/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedFields)
@@ -463,7 +553,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
         // Remove binding logic on old vehicle in backend
         const oldV = prev.find(v => v.driverName === original.name);
         if (oldV) {
-          fetch(`/api/vehicles/${oldV.id}`, {
+          fetchApi(`/api/vehicles/${oldV.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ driverName: '' })
@@ -474,7 +564,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
           next = next.map(v => v.plateNumber === updatedFields.assignedVehiclePlate ? { ...v, driverName: original.name } : v);
           const newV = next.find(v => v.plateNumber === updatedFields.assignedVehiclePlate);
           if (newV) {
-            fetch(`/api/vehicles/${newV.id}`, {
+            fetchApi(`/api/vehicles/${newV.id}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ driverName: original.name })
@@ -490,7 +580,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     const original = drivers.find(d => d.id === id);
     setDrivers(prev => prev.filter(d => d.id !== id));
 
-    fetch(`/api/drivers/${id}`, {
+    fetchApi(`/api/drivers/${id}`, {
       method: 'DELETE'
     }).catch(err => console.error(err));
 
@@ -501,7 +591,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
         const next = prev.map(v => v.plateNumber === original.assignedVehiclePlate ? { ...v, driverName: '' } : v);
         const tv = next.find(v => v.plateNumber === original.assignedVehiclePlate);
         if (tv) {
-          fetch(`/api/vehicles/${tv.id}`, {
+          fetchApi(`/api/vehicles/${tv.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ driverName: '' })
@@ -521,7 +611,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     
     setMaintenanceLogs(prev => [newM, ...prev]);
 
-    fetch('/api/maintenance', {
+    fetchApi('/api/maintenance', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newM)
@@ -532,7 +622,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
         const next = prev.map(v => v.plateNumber === newM.vehiclePlate ? { ...v, status: 'maintenance' as const } : v);
         const targetV = next.find(v => v.plateNumber === newM.vehiclePlate);
         if (targetV) {
-          fetch(`/api/vehicles/${targetV.id}`, {
+          fetchApi(`/api/vehicles/${targetV.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'maintenance' })
@@ -549,7 +639,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     const original = maintenanceLogs.find(m => m.id === id);
     setMaintenanceLogs(prev => prev.map(m => m.id === id ? { ...m, ...updatedFields } : m));
 
-    fetch(`/api/maintenance/${id}`, {
+    fetchApi(`/api/maintenance/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedFields)
@@ -562,7 +652,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
         const next = prev.map(v => v.plateNumber === original.vehiclePlate ? { ...v, status: 'operational' as const } : v);
         const targetV = next.find(v => v.plateNumber === original.vehiclePlate);
         if (targetV) {
-          fetch(`/api/vehicles/${targetV.id}`, {
+          fetchApi(`/api/vehicles/${targetV.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'operational' })
@@ -577,7 +667,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     const original = maintenanceLogs.find(m => m.id === id);
     setMaintenanceLogs(prev => prev.filter(m => m.id !== id));
 
-    fetch(`/api/maintenance/${id}`, {
+    fetchApi(`/api/maintenance/${id}`, {
       method: 'DELETE'
     }).catch(err => console.error(err));
     
@@ -603,7 +693,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     
     setDailyChecklists(prev => [newCheck, ...prev]);
 
-    fetch('/api/checklists', {
+    fetchApi('/api/checklists', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newCheck)
@@ -629,7 +719,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
         const next = prev.map(v => v.plateNumber === checklist.vehiclePlate ? { ...v, status: 'idle' as const } : v);
         const targetV = next.find(v => v.plateNumber === checklist.vehiclePlate);
         if (targetV) {
-          fetch(`/api/vehicles/${targetV.id}`, {
+          fetchApi(`/api/vehicles/${targetV.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'idle' })
@@ -649,10 +739,40 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     
     setExpenses(prev => [newE, ...prev]);
 
-    fetch('/api/expenses', {
+    // Construct a composite payload containing both camelCase and snake_case fields
+    // to map effortlessly with both Hibernate entities / Spring Boot models / raw APIs
+    const compositePayload = {
+      ...newE,
+      // camelCase
+      id: newE.id,
+      date: newE.date,
+      expenseDate: newE.date,
+      vehiclePlate: newE.vehiclePlate,
+      category: newE.category,
+      description: newE.description,
+      amount: newE.amount,
+      driverName: newE.driverName,
+      passenger: newE.passenger,
+      startLocation: newE.startLocation,
+      destination: newE.destination,
+      departureTime: newE.departureTime,
+      returnTime: newE.returnTime,
+      receiptPhoto: newE.receiptPhoto,
+
+      // snake_case/Spring Boot custom entity properties
+      expense_date: newE.date,
+      vehicle_plate: newE.vehiclePlate,
+      driver_name: newE.driverName,
+      start_location: newE.startLocation,
+      departure_time: newE.departureTime,
+      return_time: newE.returnTime,
+      struk: newE.receiptPhoto
+    };
+
+    fetchApi('/api/expenses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newE)
+      body: JSON.stringify(compositePayload)
     }).catch(err => console.error(err));
     
     logActivity('Tambah Biaya Operasional', `Melaporkan biaya ${newE.category} senilai Rp ${newE.amount.toLocaleString('id-ID')} untuk ${newE.vehiclePlate}`);
@@ -662,7 +782,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     const original = expenses.find(e => e.id === id);
     setExpenses(prev => prev.filter(e => e.id !== id));
 
-    fetch(`/api/expenses/${id}`, {
+    fetchApi(`/api/expenses/${id}`, {
       method: 'DELETE'
     }).catch(err => console.error(err));
     
@@ -672,7 +792,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
   // ==================== LOGS & NOTIFS ACTIONS ====================
   const clearLogs = () => {
     setActivityLogs([]);
-    fetch('/api/state/save', {
+    fetchApi('/api/state/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ activityLogs: [] })
@@ -681,7 +801,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
 
   const markNotificationAsRead = (id: string) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-    fetch(`/api/notifications/${id}`, {
+    fetchApi(`/api/notifications/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ read: true })
@@ -691,7 +811,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
   const markAllNotificationsAsRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     // Save standard bulk state
-    fetch('/api/state/save', {
+    fetchApi('/api/state/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ notifications: notifications.map(n => ({ ...n, read: true })) })
@@ -717,6 +837,12 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
         activityLogs,
         notifications,
         isLoading,
+        dbConnected,
+        dbProvider,
+        dbConfigured,
+        apiBaseUrl,
+        dbError,
+        refreshData,
         login,
         loginOAuth,
         logout,

@@ -11,7 +11,12 @@ import {
   Wrench,
   ShieldCheck,
   Zap,
-  Info
+  Info,
+  Database,
+  Server,
+  RefreshCw,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { VehicleStatus } from '../types';
 
@@ -26,7 +31,13 @@ export default function Dashboard({ onNavigateToSection }: DashboardProps) {
     maintenanceLogs,
     notifications,
     markNotificationAsRead,
-    language
+    language,
+    dbConnected,
+    dbProvider,
+    dbConfigured,
+    apiBaseUrl,
+    dbError,
+    refreshData
   } = useDatabase();
   const t = translations[language];
 
@@ -47,7 +58,7 @@ export default function Dashboard({ onNavigateToSection }: DashboardProps) {
   // SVG Chart: Area Trend of operations expenditure (6 values, hardcoded for nice aesthetics)
   const chartExpValues = [340, 390, 385, 420, 410, totalExpensesSum / 1000000]; // in million Rp
   const chartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Juni'];
-  
+
   // Svg chart helpers
   const svgWidth = 500;
   const svgHeight = 150;
@@ -104,10 +115,38 @@ export default function Dashboard({ onNavigateToSection }: DashboardProps) {
 
   return (
     <div className="space-y-6">
-      
+
+      {/* STATUS KONEKSI SUBTIL */}
+      <div className="flex md:flex-row flex-col justify-between items-start md:items-center gap-3 bg-white border border-slate-150 rounded-2xl p-4 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="relative flex">
+            <span className={`animate-ping absolute inline-flex h-3 w-3 rounded-full opacity-75 ${dbConnected ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
+            <span className={`relative inline-flex rounded-full h-3 w-3 ${dbConnected ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+          </div>
+          <div>
+            <div className="text-xs font-bold text-slate-800 flex items-center gap-2">
+              <span>Status Sistem DB:</span>
+              <span className={`px-2 py-0.5 text-[10px] uppercase tracking-wide font-extrabold rounded-md border ${dbConnected ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>
+                {dbConnected ? 'Terkoneksi (Oracle DB)' : 'Mode Uji Coba (Simulasi / Fallback JSON)'}
+              </span>
+            </div>
+            <span className="text-[10px] text-slate-500 block font-medium mt-0.5">
+              Endpoint API: <code className="text-blue-600 font-mono text-[10px] bg-slate-50 px-1 py-0.5 rounded">{apiBaseUrl || 'Internal Node Dev'}</code> &bull; Provider: <strong className="text-slate-650">{dbProvider}</strong>
+            </span>
+          </div>
+        </div>
+        <button
+          onClick={refreshData}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-250/70 text-slate-650 rounded-xl text-xxs font-extrabold transition-all active:scale-95 cursor-pointer shrink-0"
+        >
+          <RefreshCw className="w-3 h-3 text-blue-500" />
+          <span>Sinkronisasi Ulang</span>
+        </button>
+      </div>
+
       {/* 4 Pillars Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        
+
         {/* Total Vehicles Card */}
         <div className="bg-white border border-slate-150 p-5 rounded-2xl shadow-xs hover:shadow-md transition-all duration-300">
           <div className="flex items-center justify-between mb-2">
@@ -184,7 +223,7 @@ export default function Dashboard({ onNavigateToSection }: DashboardProps) {
 
       {/* Main Graphs Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
+
         {/* Charts & Expenditure Trend */}
         <div className="bg-white border border-slate-150 p-6 rounded-2xl shadow-xs lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
@@ -197,7 +236,7 @@ export default function Dashboard({ onNavigateToSection }: DashboardProps) {
               <span>Real-time Log</span>
             </div>
           </div>
-          
+
           {/* Custom SVG Line Chart */}
           <div className="relative w-full h-44 my-4 flex items-center justify-center">
             <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-full overflow-visible">
@@ -224,7 +263,7 @@ export default function Dashboard({ onNavigateToSection }: DashboardProps) {
               {points.map((p, idx) => (
                 <g key={idx} className="group cursor-pointer">
                   <circle cx={p.x} cy={p.y} r="5" fill="#2563eb" stroke="#ffffff" strokeWidth="1.5" className="hover:scale-130 transition-transform" />
-                  
+
                   {/* Tooltip on hovering */}
                   <rect x={p.x - 30} y={p.y - 30} width="60" height="20" rx="6" fill="#1e293b" className="opacity-0 group-hover:opacity-100 transition-opacity" />
                   <text x={p.x} y={p.y - 17} fill="#ffffff" fontSize="9" fontWeight="bold" textAnchor="middle" className="opacity-0 group-hover:opacity-100 transition-opacity font-mono">
@@ -241,7 +280,7 @@ export default function Dashboard({ onNavigateToSection }: DashboardProps) {
               ))}
             </svg>
           </div>
-          
+
           <div className="flex gap-4 items-center border-t border-slate-100 pt-4 text-xxs text-slate-500 font-medium">
             <div className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 bg-blue-600 rounded-full inline-block"></span>
@@ -255,10 +294,10 @@ export default function Dashboard({ onNavigateToSection }: DashboardProps) {
         {/* Condition Pie-Donut representation */}
         <div className="bg-white border border-slate-150 p-6 rounded-2xl shadow-xs">
           <h3 className="font-extrabold text-slate-800 text-sm tracking-tight mb-4">{t.vehicleStatus}</h3>
-          
+
           {/* Built-in Status Visual Panel */}
           <div className="flex items-center justify-around h-36">
-            
+
             {/* Minimalist Multi-Donut Ring Meter */}
             <div className="relative w-28 h-28 flex items-center justify-center">
               <svg className="w-full h-full transform -rotate-90">
@@ -312,7 +351,7 @@ export default function Dashboard({ onNavigateToSection }: DashboardProps) {
 
       {/* Sibling rows: maintenance & notifications list */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        
+
         {/* Recent Service */}
         <div className="bg-white border border-slate-150 p-6 rounded-2xl shadow-xs flex flex-col">
           <div className="flex items-center justify-between mb-4">
@@ -325,7 +364,7 @@ export default function Dashboard({ onNavigateToSection }: DashboardProps) {
               <span>&rarr;</span>
             </button>
           </div>
-          
+
           <div className="space-y-3.5 flex-1">
             {recentServis.length === 0 ? (
               <div className="p-12 text-center text-slate-400 text-xs font-medium border border-dashed border-slate-200 rounded-xl">

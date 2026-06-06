@@ -28,6 +28,7 @@ export const translations = {
     saveChanges: 'Simpan Perubahan',
     details: 'Detail',
     
+    
     // Dashboard Stats
     totalVehicles: 'Total Kendaraan',
     operational: 'Beroperasi Aktif',
@@ -126,6 +127,8 @@ export const translations = {
     category: 'Kategori Biaya',
     amount: 'Jumlah (Rp)',
     description: 'Rincian / Keterangan',
+    detailsOnly: 'Rincian',
+    remarksOnly: 'Keterangan',
     receiptPhoto: 'Bukti Kuitansi / Struk(Opsional)',
     uploadPhoto: 'Unggah Foto Bukti Transaksi',
     latestExpenses: 'Daftar Pengeluaran Terkini',
@@ -300,6 +303,8 @@ export const translations = {
     category: 'Expense Category',
     amount: 'Amount (Rp)',
     description: 'Detailed Description',
+    detailsOnly: 'Details',
+    remarksOnly: 'Keterangan',
     receiptPhoto: 'Proof of Receipt Image (Optional)',
     uploadPhoto: 'Upload Receipt Transaction Picture',
     latestExpenses: 'Recent Expense Ledger',

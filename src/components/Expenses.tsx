@@ -121,7 +121,7 @@ export default function Expenses() {
 
     // Reset Form Input
     setDate('');
-    setAmount(50000);
+    setAmount(50.000);
     setDescription('');
     setPassenger('');
     setStartLocation('');
@@ -292,7 +292,8 @@ export default function Expenses() {
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">{t.date}</th>
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">{t.vehicle}</th>
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">{t.category}</th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">{t.description}</th>
+                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">{t.detailsOnly}</th>
+                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">{t.remarksOnly}</th>
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">{t.amount}</th>
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">{t.driver}</th>
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider"></th>
@@ -301,7 +302,7 @@ export default function Expenses() {
             <tbody className="divide-y divide-slate-150">
               {filteredExpenses.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-slate-400 text-xs font-medium">
+                  <td colSpan={8} className="px-6 py-12 text-center text-slate-400 text-xs font-medium">
                     Belum terdapat rekaman biaya operasional masuk untuk kategori ini.
                   </td>
                 </tr>
@@ -321,13 +322,13 @@ export default function Expenses() {
                         {exp.category === 'other' && t.other}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-xs font-semibold text-slate-600">
+                    <td className="px-6 py-4 text-xs font-bold text-slate-800">
                       <div className="flex flex-wrap items-center gap-2">
                         <span>{exp.description}</span>
                         {exp.receiptPhoto && (
                           <button
                             onClick={() => setSelectedReceiptImage(exp.receiptPhoto!)}
-                            className="inline-flex items-center gap-1 text-[10px] bg-blue-50 text-blue-600 border border-blue-250/60 hover:bg-blue-100 rounded px-1.5 py-0.5 font-bold cursor-pointer transition-all"
+                            className="inline-flex items-center gap-1 text-[10px] bg-blue-50 text-blue-600 border border-blue-250/60 hover:bg-blue-100 rounded px-1.5 py-0.5 font-bold cursor-pointer transition-all whitespace-nowrap"
                             title="Klik untuk melihat bukti kuitansi"
                           >
                             <FileText className="w-3 h-3 text-blue-500" />
@@ -335,17 +336,19 @@ export default function Expenses() {
                           </button>
                         )}
                       </div>
-                      {(exp.passenger || exp.startLocation || exp.destination || exp.departureTime || exp.returnTime) && (
-                        <div className="mt-2 p-2 bg-slate-50 border border-slate-150 rounded-xl space-y-1 text-[11px] text-slate-550 max-w-xs md:max-w-md">
+                    </td>
+                    <td className="px-6 py-4 text-xs font-semibold text-slate-600">
+                      {(exp.passenger || exp.startLocation || exp.destination || exp.departureTime || exp.returnTime) ? (
+                        <div className="p-2 bg-slate-50 border border-slate-150 rounded-xl space-y-1 text-[11px] text-slate-550 max-w-xs md:max-w-md">
                           {exp.passenger && (
                             <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-slate-700">{t.passenger}:</span>
+                              <span className="font-bold text-slate-750">{t.passenger}:</span>
                               <span className="text-slate-600 font-medium">{exp.passenger}</span>
                             </div>
                           )}
                           {(exp.startLocation || exp.destination) && (
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-bold text-slate-700">Rute:</span>
+                              <span className="font-bold text-slate-755">Rute:</span>
                               <span className="bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded font-sans">{exp.startLocation || '-'}</span>
                               <span className="text-slate-400">➔</span>
                               <span className="bg-blue-50 text-blue-800 border border-blue-100/40 px-1.5 py-0.2 rounded font-sans font-medium">{exp.destination || '-'}</span>
@@ -353,13 +356,15 @@ export default function Expenses() {
                           )}
                           {(exp.departureTime || exp.returnTime) && (
                             <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-slate-700">Waktu:</span>
+                              <span className="font-bold text-slate-755">Waktu:</span>
                               <span className="font-mono text-slate-600 bg-slate-100/50 px-1.2 py-0.2 rounded">{exp.departureTime || '--:--'}</span>
                               <span className="text-slate-400 font-sans text-[10px]">s/d</span>
                               <span className="font-mono text-slate-600 bg-slate-100/50 px-1.2 py-0.2 rounded">{exp.returnTime || '--:--'}</span>
                             </div>
                           )}
                         </div>
+                      ) : (
+                        <span className="text-slate-400 italic text-[11px] font-sans">-</span>
                       )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-xs font-extrabold text-slate-900 font-mono">
